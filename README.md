@@ -21,7 +21,7 @@ The following command line options are supported:
 - "-d <directory>" : location of Nessus output files to be parsed and output will be saved
 - "-f <filename>" : name of the Nessus output file to be parsed (current directory is assumed for location)
 - "-i f" : instructs nepali to not include informational (severity=0) plugins in output; "-i false" works too
-- "-o <filename_base>" : base of the filename for the output file; "__parsed__(<YYYYMMDD_HHMM>).xlsx" is added automatically
+- "-o <filename_base>" : base of the filename for the output file; "\_\_parsed\_\_(<YYYYMMDD_HHMM>).xlsx" is added automatically
 
 ## Author
 Matthew Flick
