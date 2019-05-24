@@ -1,6 +1,6 @@
 # nepali
 aka NePaLi (Nessus Parser Lite)
-nepali is a python script that will parse Nessus scan results and then export the results into a spreadsheet format (Microsoft Excel ".xlsx").
+nepali is a python script that will parse Nessus scan results and then export the results into a spreadsheet format (Microsoft Excel ".xlsx"). nepali parses Nessus XML output files (by default files are saved with ".nessus" extension).
 
 ## Prerequisites
 nepali uses the following public modules:
@@ -15,7 +15,6 @@ nepali uses the following public modules:
 - sys
 - ipaddress
 - re
-nepali parses Nessus XML output files (by default files are saved with ".nessus" extension).
 
 ## Usage
 The following command line options are supported:
