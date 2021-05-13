@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 '''
 nepali
 	aka NePaLi (Nessus Parser Lite)
@@ -38,7 +39,7 @@ import re
 #
 # -- Global variables --
 #
-error_pluginId_list = ['10428', '10919', '21745', '24786', '26917', '35705', '104410']
+error_pluginId_list = ['10428', '21745', '24786', '26917', '35705', '104410', '110385', '117885']
 scan_error_list = []
 scan_time_list = []
 audit_error_description_list = ["This audit check is not running as"]
@@ -51,6 +52,7 @@ out_column_num_dict = {'Plugin Name': 0, 'Product Name': 1, 'Description': 2, 'S
 #	out_column_width_dict contains the column width for the output
 #		note: ensure out_column_num_dict and out_column_width_dict have the same keys
 out_column_width_dict = {'Plugin Name':20, 'Product Name':30, 'Description':50, 'Synopsis':25, 'Plugin Output':40, 'Solution':30, 'Patch Publication Date':20, 'Plugin Publication Date':20, 'Plugin Modification Date':20, 'Target Name': 42, 'FQDN': 25, 'Hostname':25, 'IP':15, 'Port':6, 'Protocol':8, 'Nessus Plugin ID':13, 'Associated CVEs':15, 'Reference Links':50, 'Exploit Available':13, 'Operating Systems':30, 'Nessus Severity Rating':13, 'CVSS 3-or-2 Base Score': 20, 'CVSS 3 Base Score':15, 'CVSS 3 Attack Vector':15, 'CVSS 3 Attack Complexity':15, 'CVSS 3 Privileges Required':15, 'CVSS 3 User Interaction':15, 'CVSS 3 Scope':15, 'CVSS 3 Confidentiality':15, 'CVSS 3 Integrity':15, 'CVSS 3 Availability':15, 'CVSS 3 Temporal Score':15, 'CVSS 3 Exploit Code Maturity':15, 'CVSS 3 Remediation Level':15, 'CVSS 3 Report Confidence':15, 'CVSS 2 Base Score':15, 'CVSS 2 Attack Vector':15, 'CVSS 2 Attack Complexity':15, 'CVSS 2 Privileges Required':15, 'CVSS 2 Confidentiality':15, 'CVSS 2 Integrity':15, 'CVSS 2 Availability':15, 'CVSS 2 Temporal Score':15, 'CVSS 2 Exploit Code Maturity':15, 'CVSS 2 Remediation Level':15, 'CVSS 2 Report Confidence':15}
+severity_risk_dict = {'4':"Critical", '3':"High", '2':"Medium", '1':"Low", '0':"None"}
 #
 #
 # -- Start of function declarations --
@@ -306,6 +308,7 @@ try:
 	outFileName = outFileNameBase + '.xlsx'
 	print('<< Generating Excel Workbook and Worksheets >>')
 	workbook = xlsxwriter.Workbook(outFileName, {'strings_to_urls': False})
+	workbook.set_size(2400, 1350)
 	# Declaring cell formatting styles
 	leftfont = workbook.add_format()
 	leftfont.set_align('top')
@@ -441,10 +444,16 @@ try:
 							if (not 'Hostname' in targetInfoDict.keys() or targetInfoDict['Hostname'] == "" or targetInfoDict['Hostname'] == 'Unavailable'):
 								targetInfoDict['Hostname'] = data.text
 								hostname = data.text
+						elif data.get('name') == 'system-type':
+							targetInfoDict['System Type'] = data.text
+						elif data.get('name') == 'operating-system':
+							targetInfoDict['Operating System'] = data.text
 						elif data.get('name') == 'HOST_START':
 							targetStart = data.text
 						elif data.get('name') == 'HOST_END':
 							targetEnd = data.text
+						elif data.get('name') == 'Credentialed_Scan':
+							targetInfoDict['Credentialed_Scan'] = data.text
 						else:
 							pass
 				try:
@@ -473,19 +482,32 @@ try:
 					targetInfoDict['Target Name'] = targetInfoDict['IP Address']
 				appendScanTime(file, reportName, targetInfoDict['Target Name'], targetInfoDict['FQDN'], targetInfoDict['IP Address'], targetStart, targetEnd)
 				#
+				#	print targetInfoDict for testing
+				#print("\ntargetInfoDict:\n", targetInfoDict, "\n")
+				#
 				#	Iterating through each report item (vuln) that is not part of a compliance check
 				for item in host.iter('ReportItem'):
 					severity = item.get('severity')
 					pluginName = item.get('pluginName')
+					#
+					#	print pluginName for testing
+					#print("pluginName:", pluginName)
+					#
 					pluginId = item.get('pluginID')
 					port = item.get('port')
 					protocol = item.get('protocol')
-					description = fixSpacingIssues(item.findtext('./description'))
-					description = patchAbbreviationFix(description)
+					description = 'None'
 					pluginOutput = 'None'
+					try:
+						description = fixSpacingIssues(item.findtext('./description'))
+						description = patchAbbreviationFix(description)
+					except:
+						print('findtext description threw exception')
+						pass
 					try:
 						pluginOutput = fixSpacingIssues(item.findtext('./plugin_output'))
 					except:
+						print('findtext plugin_output threw exception')
 						pass
 					#
 					#	printScanErrors and printAuditCheckError contains the error checks
@@ -498,10 +520,18 @@ try:
 						continue
 					#
 					#	First set - deal with plugins that are not compliance checks
-					if 'Compliance' not in pluginName:
+					if not 'Compliance' in pluginName:
 						#
 						#	Back to parsing fields
-						solution = fixSpacingIssues(item.findtext('solution'))
+						solution = ''
+						patch_pub_date = ''
+						plugin_pub_date = ''
+						plugin_mod_date = ''
+						exploit_available = ''
+						try:
+							solution = fixSpacingIssues(item.findtext('solution'))
+						except:
+							pass
 						patch_pub_date = item.findtext('patch_publication_date')
 						plugin_pub_date = item.findtext('plugin_publication_date')
 						plugin_mod_date = item.findtext('plugin_modification_date')
@@ -586,7 +616,8 @@ try:
 						ws_vuln.write(row_count_vuln, out_column_num_dict['Reference Links'], item.findtext('see_also'), centerfont)
 						ws_vuln.write(row_count_vuln, out_column_num_dict['Exploit Available'], exploit_available, centerfont)
 						ws_vuln.write(row_count_vuln, out_column_num_dict['Operating Systems'], os, centerfont)
-						ws_vuln.write(row_count_vuln, out_column_num_dict['Nessus Severity Rating'], item.findtext('risk_factor'), centerfont)
+						#ws_vuln.write(row_count_vuln, out_column_num_dict['Nessus Severity Rating'], item.findtext('risk_factor'), centerfont)
+						ws_vuln.write(row_count_vuln, out_column_num_dict['Nessus Severity Rating'], severity_risk_dict[severity], centerfont)
 						#
 						#	Add CVSS 3 and CVSS 2 details if the info for either was included in the results
 						#	We want to format the cells even if there is no CVSS data, so use blank if missing
@@ -817,4 +848,3 @@ except Exception as e:
 	print('\n===================')
 	print('Exiting.')
 	sys.exit()
-
