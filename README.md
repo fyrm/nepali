@@ -8,20 +8,22 @@ nepali uses the following public modules:
 - xlsxwriter
 - argparse
 - os
-- datetime
-- dateparser
-- decimal
-- traceback
 - sys
+- datetime
+- traceback
 - ipaddress
-- re
+- zipfile
+- requests
+- bs4
+- json
 
 ## Usage
 The following command line options are supported:
-- "-d <directory>" : location of Nessus output files to be parsed and output will be saved
-- "-f <filename>" : name of the Nessus output file to be parsed (current directory is assumed for location)
-- "-i f" : instructs nepali to not include informational (severity=0) plugins in output; "-i false" works too
-- "-o <filename_base>" : base of the filename for the output file; "\_\_parsed\_\_(<YYYYMMDD_HHMM>).xlsx" is added automatically
+- -h, --help  show this help message and exit
+- -d D    Location of the directory in which the Nessus output files are stored.
+- -f F    Name of the nessus file you want to parse. Ignored if -d option is used.
+- -g      Do not get missing field data (default is to make attempt
+- -n      Include "None" severity items in output (default does not include them)
 
 ## Author
 Matthew Flick
