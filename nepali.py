@@ -42,8 +42,11 @@ import json
 -- Global variables --
 
 '''
-severity_risk_dict = {"4":"Critical", "3":"High", "2":"Medium", "1":"Low", "0":"None"}
-host_props_to_get = ["operating-system", "host-ip", "hostname", "host-fqdn", "netbios-name", "system-type", "HOST_START", "HOST_END", "Credentialed_Scan"]
+nessus_severity_risk_dict = {"4": "Critical", "3": "High", "2": "Medium", "1": "Low", "0": "None"}
+cvss_risk_dict = {"Critical": {"min": 9.0, "max": 10.0}, "High": {"min": 7.0, "max": 8.9},
+				  "Medium": {"min": 4.0, "max": 6.9}, "Low": {"min": 0.1, "max": 3.9}, "None": {"min": 0.0, "max": 0.0}}
+host_props_to_get = ["operating-system", "host-ip", "hostname", "host-fqdn", "netbios-name", "system-type",
+					 "HOST_START", "HOST_END", "Credentialed_Scan"]
 #	error_plugin_id_list has plugin IDs for plugins that report scan errors
 #		I chose a subset of all possible ones included in this article:
 #		https://community.tenable.com/s/article/Useful-plugins-to-troubleshoot-credential-scans?language=en_US
@@ -167,18 +170,20 @@ def scrape_plugin_data(plugin_id):
 			html_code = response.text
 			soup = BeautifulSoup(html_code, "html.parser")
 			id_marker = "__NEXT_DATA__"
-			plugin_data_element = soup.find("script", attrs={"type": "application/json", "id": id_marker}).string
-			plugin_data_json = json.loads(plugin_data_element)
-			if "props" in plugin_data_json.keys():
-				if "pageProps" in plugin_data_json["props"].keys():
-					if "plugin" in plugin_data_json["props"]["pageProps"].keys():
-						#	print for debugging purposes
-						if "doc_id" in plugin_data_json["props"]["pageProps"]["plugin"].keys():
-							doc_id = plugin_data_json["props"]["pageProps"]["plugin"]["doc_id"]
-							print("\tscrape_plugin_data(): getting missing fields for plugin ID:", doc_id)
-						for field in plugin_missing_fields_default:
-							if field in plugin_data_json["props"]["pageProps"]["plugin"].keys():
-								retval[field] = plugin_data_json["props"]["pageProps"]["plugin"][field]
+			plugin_data_element = soup.find("script", attrs={"type": "application/json", "id": id_marker})
+			if not plugin_data_element is None:
+				plugin_data_element_str = plugin_data_element.string
+				plugin_data_json = json.loads(plugin_data_element_str)
+				if "props" in plugin_data_json.keys():
+					if "pageProps" in plugin_data_json["props"].keys():
+						if "plugin" in plugin_data_json["props"]["pageProps"].keys():
+							#	print for debugging purposes
+							if "doc_id" in plugin_data_json["props"]["pageProps"]["plugin"].keys():
+								doc_id = plugin_data_json["props"]["pageProps"]["plugin"]["doc_id"]
+								print("\tscraping Tenable web site for missing data for plugin ID:", doc_id)
+							for field in plugin_missing_fields_default:
+								if field in plugin_data_json["props"]["pageProps"]["plugin"].keys():
+									retval[field] = plugin_data_json["props"]["pageProps"]["plugin"][field]
 	except Exception as e:
 		print("==== Exception ====")
 		print("scrape_plugin_data()")
@@ -412,10 +417,10 @@ def parse_report_item(item, target_dict, out_col_dict, ns, get_mfd=True):
 		report_item_dict["port"] = item.get("port")
 		report_item_dict["protocol"] = item.get("protocol")
 		report_item_dict["severity"] = item.get("severity")
-		if report_item_dict["severity"] in severity_risk_dict.keys():
-			report_item_dict["severity"] = severity_risk_dict[report_item_dict["severity"]]
+		if str(report_item_dict["severity"]) in nessus_severity_risk_dict.keys():
+			report_item_dict["Nessus Risk"] = nessus_severity_risk_dict[str(report_item_dict["severity"])]
 		else:
-			print("Warning: severity value is not in severity_risk_dict.")
+			print("Warning: severity value is not in nessus_severity_risk_dict.")
 		report_item_dict["description"] = fix_spacing_issues(item.findtext("description", default=""))
 		report_item_dict["description"] = patch_abbreviation_fix(report_item_dict["description"])
 		report_item_dict["plugin_output"] = fix_spacing_issues(item.findtext("plugin_output", default=""))
@@ -464,6 +469,10 @@ def parse_report_item(item, target_dict, out_col_dict, ns, get_mfd=True):
 				report_item_dict["cvss3or2_base_score"] = report_item_dict["cvss3_base_score"]
 			elif (report_item_dict["cvss_base_score"] != None and report_item_dict["cvss_base_score"] != ""):
 				report_item_dict["cvss3or2_base_score"] = report_item_dict["cvss_base_score"]
+			if report_item_dict["cvss3or2_base_score"] != "":
+				get_key = lambda x, d: next((key for key, value in d.items() if value["min"] <= x <= value["max"]), "")
+				cvss_score_float = float(report_item_dict["cvss3or2_base_score"])
+				report_item_dict["CVSS Risk"] = get_key(x=cvss_score_float, d=cvss_risk_dict)
 		#
 		#	Second set - deal with compliance checks
 		elif "Compliance" in report_item_dict["plugin_name"]:
@@ -593,12 +602,6 @@ def set_out_col_style(workbook, cell_fonts, out_col_dict):
 		cell_fonts["header"].set_align("top")
 		cell_fonts["header"].set_text_wrap()
 		cell_fonts["header"].set_border()
-		cell_fonts["red_text"] = workbook.add_format()
-		cell_fonts["red_text"].set_align("center")
-		cell_fonts["red_text"].set_align("top")
-		cell_fonts["red_text"].set_text_wrap()
-		cell_fonts["red_text"].set_font_color("#FF0000")
-		cell_fonts["red_text"].set_border()
 		cell_fonts["date_format"] = workbook.add_format({"num_format": "yyyy-mm-dd"})
 		cell_fonts["date_format"].set_align("center")
 		cell_fonts["date_format"].set_align("top")
@@ -636,7 +639,7 @@ def set_out_col_style(workbook, cell_fonts, out_col_dict):
 		#	"issue" type worksheet
 		out_col_dict["issue"] = {
 			"Plugin Name":{"num":0, "width":20, "map":"plugin_name", "font":cell_fonts["center"]},
-			"Product Name":{"num":1, "width":30, "map":"product_name", "font":cell_fonts["center"]},
+			"Product Name":{"num":1, "width":30, "map":"Product Name", "font":cell_fonts["center"]},
 			"Description":{"num":2, "width":50, "map":"description", "font":cell_fonts["left"]},
 			"Synopsis":{"num":3, "width":25, "map":"synopsis", "font":cell_fonts["left"]},
 			"Plugin Output":{"num":4, "width":40, "map":"plugin_output", "font":cell_fonts["left"]},
@@ -661,21 +664,23 @@ def set_out_col_style(workbook, cell_fonts, out_col_dict):
 			"Operating System":{"num":19, "width":30, "map":"operating-system",
 								  "font":cell_fonts["center"]},
 			"Nessus Severity":{"num":20, "width":13, "map":"severity", "font":cell_fonts["center"]},
-			"CVSS 3-or-2 Base Score":{"num":21, "width":20, "map":"cvss3or2_base_score",
+			"Nessus Risk":{"num":21, "width":13, "map":"Nessus Risk", "font":cell_fonts["center"]},
+			"CVSS Risk":{"num":22, "width":13, "map":"CVSS Risk", "font":cell_fonts["center"]},
+			"CVSS 3-or-2 Base Score":{"num":23, "width":20, "map":"cvss3or2_base_score",
 									   "font":cell_fonts["center"]},
-			"CVSS 3.0 Base Score":{"num":22, "width":15, "map":"cvss3_base_score",
+			"CVSS 3.0 Base Score":{"num":24, "width":15, "map":"cvss3_base_score",
 									"font":cell_fonts["center"]},
-			"CVSS 3.0 Base Vector":{"num":23, "width":30, "map":"cvss3_vector", "font":cell_fonts["center"]},
-			"CVSS 3 Temporal Score":{"num":24, "width":15, "map":"cvss3_temporal_score",
+			"CVSS 3.0 Base Vector":{"num":25, "width":30, "map":"cvss3_vector", "font":cell_fonts["center"]},
+			"CVSS 3 Temporal Score":{"num":26, "width":15, "map":"cvss3_temporal_score",
 									  "font":cell_fonts["center"]},
-			"CVSS 3 Temporal Vector":{"num":25, "width":30, "map":"cvss3_temporal_vector",
+			"CVSS 3 Temporal Vector":{"num":27, "width":30, "map":"cvss3_temporal_vector",
 									  "font":cell_fonts["center"]},
-			"CVSS 2 Base Score": {"num": 26, "width": 15, "map": "cvss_base_score", "font": cell_fonts["center"]},
-			"CVSS 2 Base Vector": {"num": 27, "width": 25, "map": "cvss_vector", "font": cell_fonts["center"]},
-			"CVSS 2 Temporal Score": {"num": 28, "width": 15, "map": "cvss_temporal_score",
-									  "font": cell_fonts["center"]},
-			"CVSS 2 Temporal Vector": {"num": 29, "width": 25, "map": "cvss_temporal_vector",
-									   "font": cell_fonts["center"]}
+			"CVSS 2 Base Score":{"num":28, "width":15, "map":"cvss_base_score", "font":cell_fonts["center"]},
+			"CVSS 2 Base Vector":{"num":29, "width":25, "map":"cvss_vector", "font":cell_fonts["center"]},
+			"CVSS 2 Temporal Score":{"num":30, "width":15, "map":"cvss_temporal_score",
+									  "font":cell_fonts["center"]},
+			"CVSS 2 Temporal Vector":{"num":31, "width":25, "map":"cvss_temporal_vector",
+									   "font":cell_fonts["center"]}
 		}
 	except Exception as e:
 		print("==== Exception ====")
@@ -784,8 +789,8 @@ def main():
 		parser = argparse.ArgumentParser()
 		parser.add_argument("-d", help="Location of the directory in which the Nessus output files are stored.")
 		parser.add_argument("-f", help="Name of the nessus file you want to parse. Ignored if -d option is used.")
-		parser.add_argument("-g", nargs='?', help="Do not get missing field data (default is to make attempt")
-		parser.add_argument("-n", nargs='?', help="Include \"None\" severity items in output (default does not include them)")
+		parser.add_argument("-g", action='store_false', help="Do not get missing field data (default is to make attempt")
+		parser.add_argument("-n", action='store_true', help="Include \"None\" severity items in output (default does not include them)")
 		parser.add_argument("-o", help="Base name of spreadsheet file to which you want the parsed results to be written.")
 		'''
 			Removed these arguments because they're confusing. Default is now to exclude None severity (severity=0) plugins.
@@ -812,10 +817,12 @@ def main():
 		worksheets["audit_fail"] = {"name":"Scan Data (audit fail)", "type": "issue", "row_count": 1}
 		worksheets["audit_error"] = {"name":"Scan Data (audit errors)", "type": "issue", "row_count": 1}
 		#	parse arguments
-		if args.g:
+		print("args.g:", args.g)
+		if args.g is False:
 			get_mfd = False
 			print("Disabled scraping missing data fields from Tenable web site")
-		if args.n:
+		print("args.n:", args.n)
+		if args.n is True:
 			include_info_items = True
 			print("Including informational items (severity==0) in output")
 		try:
@@ -900,13 +907,23 @@ def main():
 						target_dict["File Name"] = filename_nopath
 						target_dict["Report Name"] = report_name
 						report_dict[worksheets["time"]["name"]].append(target_dict)
+						'''print("\n" + "added to time - target_dict:", target_dict)
+						print()'''
 						#	Iterating through each report item for this host/target
+						print_count = 0
+						print_max = 2
 						for item in host.iter("ReportItem"):
 							report_item_dict = parse_report_item(item, target_dict, out_col_dict, ns, get_mfd)
 							#	parse_report_item() does not add "File Name" or "Report Name"
 							#		currently only needed with error plugins going into the error worksheet
-							report_item_dict["File Name"] = filename_nopath
-							report_item_dict["Report Name"] = report_name
+							for key,val in target_dict.items():
+								report_item_dict[key] = val
+							#report_item_dict["File Name"] = filename_nopath
+							#report_item_dict["Report Name"] = report_name
+							'''if print_count < print_max:
+								print("\n" + "adding to issue worksheet - report_item_dict:", report_item_dict)
+								print()
+								print_count += 1'''
 							if not "Compliance" in report_item_dict["plugin_name"]:
 								#	add to error worksheet if it's in the list (defined globally)
 								if report_item_dict["plugin_id"] in error_plugin_id_list:
@@ -914,7 +931,7 @@ def main():
 								#	add to vuln worksheet depending on severity and arguments given to nepali
 								if include_info_items is True:
 									report_dict[worksheets["vuln"]["name"]].append(report_item_dict)
-								elif include_info_items is False and report_item_dict["severity"] != "None":
+								elif include_info_items is False and report_item_dict["severity"] != "0":
 									report_dict[worksheets["vuln"]["name"]].append(report_item_dict)
 							elif "Compliance" in report_item_dict["plugin_name"]:
 								if "[FAILED]" in report_item_dict["description"]:
@@ -1013,3 +1030,4 @@ if __name__ == "__main__":
 						   "RC:C": "Report Confidence: Confirmed",
 						   "RC:ND": "Report Confidence: Not Defined"}
 	'''
+
