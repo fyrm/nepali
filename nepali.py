@@ -420,8 +420,7 @@ def parse_report_item(item, target_dict, out_col_dict, ns, get_mfd=True):
 		report_item_dict["description"] = patch_abbreviation_fix(report_item_dict["description"])
 		report_item_dict["plugin_output"] = fix_spacing_issues(item.findtext("plugin_output", default=""))
 		if str(report_item_dict["plugin_id"]) == "19506":
-			if not "Credentialed_Scan" in target_dict.keys():
-				target_dict["Credentialed_Scan"] = get_cred_scan(report_item_dict["plugin_output"])
+			target_dict["Credentialed_Scan"] = get_cred_scan(report_item_dict["plugin_output"])
 		cve_list = []
 		try:
 			all_cves = item.findall("cve")
