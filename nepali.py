@@ -292,6 +292,12 @@ def patch_abbreviation_fix(instring):
 	parse_cpe_data
 	
 		function to parse a CPE list
+		
+		positions split by ":"
+		0	:	1	:	2		:	3		:	4		:	5		:	6		:	7
+		cpe:/ {part} : {vendor} : {product} : {version} : {update} : {edition} : {language}
+		
+		nepali is only including up to the version, so disregarding positions after that
 
 '''
 def parse_cpe_data(cpe_data):
@@ -301,18 +307,25 @@ def parse_cpe_data(cpe_data):
 			cpe_list_lines = all_cpe.text.splitlines()
 			for cpe_line in cpe_list_lines:
 				cpe_words = cpe_line.split(':')
-				vendor = cpe_words[2]
-				product = cpe_words[3]
-				version = ""
-				if len(cpe_words) > 4:
-					version = cpe_words[4]
-				if vendor == product:
-					cpe_list.append(vendor)
-				else:
-					if len(cpe_words) > 4 and product != version:
-						cpe_list.append(vendor+" "+product+" "+version)
-					else:
-						cpe_list.append(vendor+" "+product)
+				if len(cpe_words) > 1:
+					part = cpe_words[1]
+					if len(cpe_words) > 2:
+						vendor = cpe_words[2]
+						if len(cpe_words) > 3:
+							product = cpe_words[3]
+							if len(cpe_words) > 4:
+								version = cpe_words[4]
+								if vendor == product:
+									cpe_list.append(vendor + " " + version)
+								else:
+									cpe_list.append(vendor + " " + product + " " + version)
+							else:
+								if vendor == product:
+									cpe_list.append(vendor)
+								else:
+									cpe_list.append(vendor + " " + product)
+						else:
+							cpe_list.append(vendor)
 	except Exception as e:
 		print('\n==== Exception ====\n\tparse_cpe_data()\n----')
 		print(e)
@@ -1030,4 +1043,4 @@ if __name__ == "__main__":
 						   "RC:C": "Report Confidence: Confirmed",
 						   "RC:ND": "Report Confidence: Not Defined"}
 	'''
-
+	
