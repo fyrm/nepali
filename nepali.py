@@ -51,14 +51,19 @@ host_props_to_get = ["operating-system", "host-ip", "hostname", "host-fqdn", "ne
 #		I chose a subset of all possible ones included in this article:
 #		https://community.tenable.com/s/article/Useful-plugins-to-troubleshoot-credential-scans?language=en_US
 error_plugin_id_list = ["10428", "11149", "21745", "24786", "26917", "35705", "35705", "104410", "110385", "117885"]
+#	the following require an Internet connection and access to the Tenable public-facing web site:
+#		https://www.tenable.com/plugins/nessus/<plugin_id>
 #	plugin_missing_fields_default has keys for data fields that are sometimes not included in scan exports
 #		so there's a function to get these values from the tenable web site
+#		i used a dictionary because some fields have a different key name in the html than in report output
 #		could add more fields, like the following, but these may not be important to you
-#		"cvss3_base_score", "cvss_base_score", "cvss3_temporal_score", "cvss_temporal_score", ...
+#			"cvss3_base_score", "cvss_base_score", "cvss3_temporal_score", "cvss_temporal_score", ...
+#		be careful adding fields like "patch_publication_date" as that is not relevant to all plugins
 #	plugin_downloaded_content will hold values for these downloaded field values but only for each nepali run
 #	scraping_timeout is the max amount of time (in seconds) to wait for response from the tenable web site
 #	if more than scraping_attempts_max timeouts occur, stop future attempts by setting web_scraping_failed = True
-plugin_missing_fields_default = ["description", "patch_publication_date", "plugin_publication_date", "synopsis"]
+plugin_missing_fields_default = {"plugin_name": "script_name", "description": "description", "synopsis": "synopsis",
+								 "solution": "solution", "plugin_publication_date": "plugin_publication_date"}
 plugin_downloaded_content = {}
 scraping_timeout = 3
 scraping_attempts_max = 3
@@ -181,9 +186,9 @@ def scrape_plugin_data(plugin_id):
 							if "doc_id" in plugin_data_json["props"]["pageProps"]["plugin"].keys():
 								doc_id = plugin_data_json["props"]["pageProps"]["plugin"]["doc_id"]
 								print("\tscraping Tenable web site for missing data for plugin ID:", doc_id)
-							for field in plugin_missing_fields_default:
-								if field in plugin_data_json["props"]["pageProps"]["plugin"].keys():
-									retval[field] = plugin_data_json["props"]["pageProps"]["plugin"][field]
+							for field,scrape_field in plugin_missing_fields_default.items():
+								if scrape_field in plugin_data_json["props"]["pageProps"]["plugin"].keys():
+									retval[field] = plugin_data_json["props"]["pageProps"]["plugin"][scrape_field]
 	except Exception as e:
 		print("==== Exception ====")
 		print("scrape_plugin_data()")
@@ -422,21 +427,40 @@ def parse_report_item(item, target_dict, out_col_dict, ns, get_mfd=True):
 		#	"attributes" in the ReportItem tag (common content) first
 		report_item_dict["plugin_id"] = item.get("pluginID")
 		report_item_dict["plugin_name"] = item.get("pluginName")
+		report_item_dict["compliance"] = item.findtext("compliance", default=False)
+		true_str = ["true", "yes", "on", "1"]
+		false_str = ["false", "no", "off", "0"]
+		if str(report_item_dict["compliance"]).lower() in true_str:
+			report_item_dict["compliance"] = True
+		elif str(report_item_dict["compliance"]).lower() in false_str:
+			report_item_dict["compliance"] = False
+		else:
+			print("parse_report_item(): Warning: invalid compliance value in report item:")
+			print("\tsetting to False for plugin_id: {}".format(report_item_dict["plugin_id"]))
+			report_item_dict["compliance"] = False
 		#	plugin name should be stored in 2 places
 		#	go with the <plugin_name> field instead of the ReportItem attribute if different
 		temp_name = fix_spacing_issues(item.findtext("plugin_name", default=""))
-		if report_item_dict["plugin_name"] is None or temp_name != report_item_dict["plugin_name"]:
-			report_item_dict["plugin_name"] = temp_name
+		if not temp_name is None:
+			if report_item_dict["plugin_name"] is None or len(temp_name) > len(report_item_dict["plugin_name"]):
+				report_item_dict["plugin_name"] = temp_name
+		else:
+			report_item_dict["plugin_name"] = ""
 		report_item_dict["port"] = item.get("port")
 		report_item_dict["protocol"] = item.get("protocol")
 		report_item_dict["severity"] = item.get("severity")
 		if str(report_item_dict["severity"]) in nessus_severity_risk_dict.keys():
 			report_item_dict["Nessus Risk"] = nessus_severity_risk_dict[str(report_item_dict["severity"])]
 		else:
+			report_item_dict["Nessus Risk"] = "Unknown"
 			print("Warning: severity value is not in nessus_severity_risk_dict.")
-		report_item_dict["description"] = fix_spacing_issues(item.findtext("description", default=""))
-		report_item_dict["description"] = patch_abbreviation_fix(report_item_dict["description"])
-		report_item_dict["plugin_output"] = fix_spacing_issues(item.findtext("plugin_output", default=""))
+		report_item_dict["description"] = item.findtext("description", default="")
+		cleaned_description = fix_spacing_issues(report_item_dict["description"])
+		#	leave the compliance descriptions as is but clean the other/vulnerability descriptions
+		if not "Compliance" in report_item_dict["description"] and report_item_dict["compliance"] == False:
+			report_item_dict["description"] = cleaned_description
+			report_item_dict["description"] = patch_abbreviation_fix(report_item_dict["description"])
+		report_item_dict["plugin_output"] = item.findtext("plugin_output", default="")
 		if str(report_item_dict["plugin_id"]) == "19506":
 			target_dict["Credentialed_Scan"] = get_cred_scan(report_item_dict["plugin_output"])
 		cve_list = []
@@ -458,7 +482,7 @@ def parse_report_item(item, target_dict, out_col_dict, ns, get_mfd=True):
 		#
 		#	The available fields and field names vary depending on whether the plugin is in the compliance set or not 
 		#	First set - deal with plugins that are not compliance checks
-		if not "Compliance" in report_item_dict["plugin_name"]:
+		if not "Compliance" in report_item_dict["plugin_name"] and report_item_dict["compliance"] is False:
 			report_item_dict["synopsis"] = item.findtext("synopsis", default="")
 			report_item_dict["solution"] = item.findtext("solution", default="")
 			report_item_dict["patch_publication_date"] = item.findtext("patch_publication_date", default="")
@@ -486,58 +510,66 @@ def parse_report_item(item, target_dict, out_col_dict, ns, get_mfd=True):
 				get_key = lambda x, d: next((key for key, value in d.items() if value["min"] <= x <= value["max"]), "")
 				cvss_score_float = float(report_item_dict["cvss3or2_base_score"])
 				report_item_dict["CVSS Risk"] = get_key(x=cvss_score_float, d=cvss_risk_dict)
+			#
+			#	try to get the static content for missing fields but only if it's a vulnerability check
+			#		compliance plugins have very few details on the web site
+			#		copied here for reference:
+			#		plugin_missing_fields_default = ["description", "patch_publication_date",
+			#			"plugin_publication_date", "synopsis", "cvss3_base_score", "cvss_base_score"]
+			if get_mfd is True and web_scraping_failed is False:
+				for mfd in plugin_missing_fields_default.keys():
+					if report_item_dict[mfd] is None or report_item_dict[mfd] == "" or len(
+							report_item_dict[mfd]) == 0:
+						#	if one field is missing then most likely all of these items are missing, so just get the static content for all of them
+						#	first check the current content we have downloaded
+						#	if the current plugin_id has not yet been scraped, then scrape it
+						this_plugin_id = report_item_dict["plugin_id"]
+						if this_plugin_id in plugin_downloaded_content.keys():
+							for plugin_key, plugin_val in plugin_downloaded_content[this_plugin_id].items():
+								report_item_dict[plugin_key] = plugin_val
+						else:
+							scraped_plugin_dict = scrape_plugin_data(this_plugin_id)
+							if not scraped_plugin_dict is None and len(scraped_plugin_dict) > 0:
+								plugin_downloaded_content[this_plugin_id] = {}
+								for scraped_key, scraped_val in scraped_plugin_dict.items():
+									report_item_dict[scraped_key] = scraped_val
+									plugin_downloaded_content[this_plugin_id][scraped_key] = scraped_val
 		#
 		#	Second set - deal with compliance checks
-		elif "Compliance" in report_item_dict["plugin_name"]:
+		#elif "Compliance" in report_item_dict["plugin_name"] or report_item_dict["compliance"] is True:
+		else:
+			report_item_dict["compliance"] = True
+			report_item_dict["compliance-result"] = ""
+			try:
+				report_item_dict["compliance-result"] = item.find("cm:compliance-result", ns).text
+			except:
+				pass
 			#	Not all audit compliance checks have each field, so using independent try"s
 			try:
 				#	use cm:compliance-check-name instead of plugin_name
-				report_item_dict["plugin_name"] = fix_spacing_issues(item.find("cm:compliance-check-name", ns).text)
+				report_item_dict["plugin_name"] = item.find("cm:compliance-check-name", ns).text
 			except:
 				pass
 			try:
 				# use cm:compliance-actual-value instead of plugin_output
-				report_item_dict["plugin_output"] = fix_spacing_issues(item.find("cm:compliance-actual-value", ns).text)
+				report_item_dict["plugin_output"] = item.find("cm:compliance-actual-value", ns).text
 			except:
 				pass
 			try:
 				#	use cm:compliance-info instead of synopsis
-				report_item_dict["synopsis"] = fix_spacing_issues(item.find("cm:compliance-info", ns).text)
+				report_item_dict["synopsis"] = item.find("cm:compliance-info", ns).text
 			except:
 				pass
 			try:
 				#	use cm:compliance-solution instead of solution
-				report_item_dict["solution"] = fix_spacing_issues(item.find("cm:compliance-solution", ns).text)
+				report_item_dict["solution"] = item.find("cm:compliance-solution", ns).text
 			except:
 				pass
 			try:
 				#	use cm:compliance-see-also instead of see_also
-				report_item_dict["see_also"] = fix_spacing_issues(item.find("cm:compliance-see-also", ns).text)
+				report_item_dict["see_also"] = item.find("cm:compliance-see-also", ns).text
 			except:
 				pass
-		#
-		#	try to get the static content for missing fields
-		#		copied here for reference:
-		#		plugin_missing_fields_default = ["description", "patch_publication_date",
-		#			"plugin_publication_date", "synopsis", "cvss3_base_score", "cvss_base_score"]
-		if get_mfd is True and web_scraping_failed is False:
-			for mfd in plugin_missing_fields_default:
-				if report_item_dict[mfd] is None or report_item_dict[mfd] == "" or len(
-						report_item_dict[mfd]) == 0:
-					#	if one field is missing then most likely all of these items are missing, so just get the static content for all of them
-					#	first check the current content we have downloaded
-					#	if the current plugin_id has not yet been scraped, then scrape it
-					this_plugin_id = report_item_dict["plugin_id"]
-					if this_plugin_id in plugin_downloaded_content.keys():
-						for plugin_key, plugin_val in plugin_downloaded_content[this_plugin_id].items():
-							report_item_dict[plugin_key] = plugin_val
-					else:
-						scraped_plugin_dict = scrape_plugin_data(this_plugin_id)
-						if not scraped_plugin_dict is None and len(scraped_plugin_dict) > 0:
-							plugin_downloaded_content[this_plugin_id] = {}
-							for scraped_key, scraped_val in scraped_plugin_dict.items():
-								report_item_dict[scraped_key] = scraped_val
-								plugin_downloaded_content[this_plugin_id][scraped_key] = scraped_val
 	except Exception as e:
 		print("==== Exception ====")
 		print("parse_report_item()")
@@ -546,16 +578,19 @@ def parse_report_item(item, target_dict, out_col_dict, ns, get_mfd=True):
 		print("===================")
 	return report_item_dict
 
+
 '''
 
 	write_worksheet_data
-	
+
 		write row data to a given worksheet
 		input parameters:
 			ws_type in ["issue", "error", "time"]
 			row_item_list is a list of dictionaries with data for each row in the output
 
 '''
+
+
 def write_worksheet_data(worksheet, ws_type, row_item_list, out_col_dict, ws_row_count):
 	try:
 		if ws_type in out_col_dict.keys():
@@ -725,7 +760,6 @@ def prep_worksheet(worksheet, ws_type, cell_fonts, out_col_dict):
 		print(e)
 		traceback.print_exc()
 		print("===================")
-	return worksheet
 
 '''
 
@@ -746,7 +780,7 @@ def prep_workbook(wb_name, ws_dict, cell_fonts, out_col_dict):
 								  out_col_dict=out_col_dict)
 		for ws_nickname, ws_struct_dict in ws_dict.items():
 			temp = workbook.add_worksheet(ws_struct_dict["name"])
-			temp = prep_worksheet(worksheet=temp, ws_type=ws_struct_dict["type"], cell_fonts=cell_fonts,
+			prep_worksheet(worksheet=temp, ws_type=ws_struct_dict["type"], cell_fonts=cell_fonts,
 								  out_col_dict=out_col_dict)
 	except Exception as e:
 		print("==== Exception ====")
@@ -920,24 +954,14 @@ def main():
 						target_dict["File Name"] = filename_nopath
 						target_dict["Report Name"] = report_name
 						report_dict[worksheets["time"]["name"]].append(target_dict)
-						'''print("\n" + "added to time - target_dict:", target_dict)
-						print()'''
 						#	Iterating through each report item for this host/target
-						print_count = 0
-						print_max = 2
 						for item in host.iter("ReportItem"):
 							report_item_dict = parse_report_item(item, target_dict, out_col_dict, ns, get_mfd)
 							#	parse_report_item() does not add "File Name" or "Report Name"
 							#		currently only needed with error plugins going into the error worksheet
 							for key,val in target_dict.items():
 								report_item_dict[key] = val
-							#report_item_dict["File Name"] = filename_nopath
-							#report_item_dict["Report Name"] = report_name
-							'''if print_count < print_max:
-								print("\n" + "adding to issue worksheet - report_item_dict:", report_item_dict)
-								print()
-								print_count += 1'''
-							if not "Compliance" in report_item_dict["plugin_name"]:
+							if not "Compliance" in report_item_dict["plugin_name"] and report_item_dict["compliance"] is False:
 								#	add to error worksheet if it's in the list (defined globally)
 								if report_item_dict["plugin_id"] in error_plugin_id_list:
 									report_dict[worksheets["error"]["name"]].append(report_item_dict)
@@ -946,15 +970,19 @@ def main():
 									report_dict[worksheets["vuln"]["name"]].append(report_item_dict)
 								elif include_info_items is False and report_item_dict["severity"] != "0":
 									report_dict[worksheets["vuln"]["name"]].append(report_item_dict)
-							elif "Compliance" in report_item_dict["plugin_name"]:
-								if "[FAILED]" in report_item_dict["description"]:
+							elif "Compliance" in report_item_dict["plugin_name"] or report_item_dict["compliance"] is True:
+								#print("Compliance report item; plugin_id: {}".format(report_item_dict["plugin_id"]))
+								if "[FAILED]" in report_item_dict["description"] or report_item_dict["compliance-result"] == "FAILED":
 									report_dict[worksheets["audit_fail"]["name"]].append(report_item_dict)
-								elif "[ERROR]" in report_item_dict["description"]:
+								elif "[ERROR]" in report_item_dict["description"] or report_item_dict["compliance-result"] == "ERROR":
+									report_dict[worksheets["audit_error"]["name"]].append(report_item_dict)
+								elif "[WARNING]" in report_item_dict["description"] or report_item_dict["compliance-result"] == "WARNING":
 									report_dict[worksheets["audit_error"]["name"]].append(report_item_dict)
 								else:
-									print("Warning: not sure how to report item:", report_item_dict["plugin_name"])
+									#	compliance check passed so ignore it
+									pass
 							else:
-								print("Warning: not sure how to report item:", report_item_dict["plugin_name"])
+								print("Warning: not sure how to report item: {0} - {1}".format(report_item_dict["plugin_id"], report_item_dict["plugin_name"]))
 						# --End ReportItem iter --
 						print("\t\tFinished parsing:", target_dict["Target Name"])
 				#	add data to output
@@ -1043,4 +1071,3 @@ if __name__ == "__main__":
 						   "RC:C": "Report Confidence: Confirmed",
 						   "RC:ND": "Report Confidence: Not Defined"}
 	'''
-	
