@@ -590,23 +590,25 @@ def parse_report_item(item, target_dict, out_col_dict, ns, get_mfd=True):
 
 '''
 
-
-def write_worksheet_data(worksheet, ws_type, row_item_list, out_col_dict, ws_row_count):
+def write_worksheet_data(workbook, worksheets, report_dict, out_col_dict):
 	try:
-		if ws_type in out_col_dict.keys():
-			for row_item_dict in row_item_list:
+		#	worksheets format reminder:
+		#		worksheets["time"] = {"name":"Time", "type": "time", "row_count": 1}
+		for ws_key, ws_val in worksheets.items():
+			ws = workbook.get_worksheet_by_name(worksheets[ws_key]["name"])
+			ws_type = worksheets[ws_key]["type"]
+			for row_item_dict in report_dict[worksheets[ws_key]["name"]]:
 				for col_name, col_dict in out_col_dict[ws_type].items():
-					#	col_name is just the output title, so we need the "map" value as a key in the row_item_dict
 					value = row_item_dict[col_dict["map"]]
-					worksheet.write(ws_row_count, col_dict["num"], value, col_dict["font"])
-				ws_row_count += 1
+					ws.write(worksheets[ws_key]["row_count"], col_dict["num"], value, col_dict["font"])
+				worksheets[ws_key]["row_count"] += 1
 	except Exception as e:
 		print("==== Exception ====")
 		print("write_worksheet_data()")
 		print(e)
 		traceback.print_exc()
 		print("===================")
-	return worksheet, ws_row_count
+	return worksheets
 
 '''
 
@@ -688,8 +690,8 @@ def set_out_col_style(workbook, cell_fonts, out_col_dict):
 		out_col_dict["issue"] = {
 			"Plugin Name":{"num":0, "width":20, "map":"plugin_name", "font":cell_fonts["center"]},
 			"Product Name":{"num":1, "width":30, "map":"Product Name", "font":cell_fonts["center"]},
-			"Description":{"num":2, "width":50, "map":"description", "font":cell_fonts["left"]},
-			"Synopsis":{"num":3, "width":25, "map":"synopsis", "font":cell_fonts["left"]},
+			"Synopsis":{"num":2, "width":25, "map":"synopsis", "font":cell_fonts["left"]},
+			"Description":{"num":3, "width":50, "map":"description", "font":cell_fonts["left"]},
 			"Plugin Output":{"num":4, "width":40, "map":"plugin_output", "font":cell_fonts["left"]},
 			"Solution":{"num":5, "width":30, "map":"solution", "font":cell_fonts["left"]},
 			"Patch Publication Date":{"num":6, "width":25, "map":"patch_publication_date",
@@ -986,15 +988,8 @@ def main():
 						# --End ReportItem iter --
 						print("\t\tFinished parsing:", target_dict["Target Name"])
 				#	add data to output
-				#	worksheets format reminder:
-				#		worksheets["time"] = {"name":"Time", "type": "time", "row_count": 1}
-				for ws_key, ws_val in worksheets.items():
-					ws = workbook.get_worksheet_by_name(worksheets[ws_key]["name"])
-					ws_type = worksheets[ws_key]["type"]
-					report_item_list = report_dict[worksheets[ws_key]["name"]]
-					ws_count = worksheets[ws_key]["row_count"]
-					ws, ws_cols = write_worksheet_data(worksheet=ws, ws_type=ws_type, row_item_list=report_item_list,
-													   out_col_dict=out_col_dict, ws_row_count=ws_count)
+				worksheets = write_worksheet_data(workbook=workbook, worksheets=worksheets, report_dict=report_dict,
+												  out_col_dict=out_col_dict)
 				# --End ReportHost iter
 				print("...\nFinished parsing file: " + file)
 			# --End Report iter
