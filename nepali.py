@@ -183,7 +183,6 @@ def scrape_plugin_data(plugin_id):
 			soup = BeautifulSoup(html_code, "html.parser")
 			id_marker = "__NEXT_DATA__"
 			plugin_data_element = soup.find("script", attrs={"type": "application/json", "id": id_marker})
-			print("scrape_plugin_data(): len(plugin_data_element)", len(plugin_data_element))
 			if not plugin_data_element is None:
 				plugin_data_element_str = plugin_data_element.string
 				plugin_data_json = json.loads(plugin_data_element_str)
@@ -191,7 +190,6 @@ def scrape_plugin_data(plugin_id):
 					if "pageProps" in plugin_data_json["props"].keys():
 						if "plugin" in plugin_data_json["props"]["pageProps"].keys():
 							#	print for debugging purposes
-							print("\tscraping Tenable web site for missing data for plugin ID:", plugin_id)
 							if "doc_id" in plugin_data_json["props"]["pageProps"]["plugin"].keys():
 								doc_id = plugin_data_json["props"]["pageProps"]["plugin"]["doc_id"]
 								print("\tscraping Tenable web site for missing data for plugin ID:", doc_id)
@@ -211,8 +209,6 @@ def scrape_plugin_data(plugin_id):
 										retval[field] = dt.strftime("%Y/%m/%d")
 									except:
 										retval[field] = scrape_text
-							print("scrape_plugin_data(): retval:", str(retval))
-							print("\n")
 	except Exception as e:
 		print("==== Exception ====")
 		print("scrape_plugin_data()")
