@@ -30,6 +30,7 @@ import argparse
 import os
 import sys
 import datetime
+import dateutil
 import traceback
 import ipaddress
 import zipfile
@@ -64,6 +65,9 @@ error_plugin_id_list = ["10428", "11149", "21745", "24786", "26917", "35705", "3
 #	if more than scraping_attempts_max timeouts occur, stop future attempts by setting web_scraping_failed = True
 plugin_missing_fields_default = {"plugin_name": "script_name", "description": "description", "synopsis": "synopsis",
 								 "solution": "solution", "plugin_publication_date": "plugin_publication_date"}
+#	whereas the fields in plugin_missing_fields_default will be checked to see if blank/missing in the scan output,
+#		plugin_missing_fields_extra will only be used to scrape data from the web site if any fields above were missing
+plugin_missing_fields_extra = {"patch_publication_date": "patch_publication_date"}
 plugin_downloaded_content = {}
 scraping_timeout = 3
 scraping_attempts_max = 3
@@ -160,6 +164,8 @@ def extract_nessus_zip(directory, zfile):
 def scrape_plugin_data(plugin_id):
 	retval = {}
 	try:
+		print("\n")
+		print("called scrape_plugin_data for plugin ID:", plugin_id)
 		plugin_url_base = "https://www.tenable.com/plugins/nessus/"
 		plugin_url = plugin_url_base + str(plugin_id)
 		response = ""
@@ -171,11 +177,13 @@ def scrape_plugin_data(plugin_id):
 				response_attempt_count += 1
 		if response_attempt_count >= scraping_attempts_max:
 			web_scraping_failed = True
+			print("scraping failed\n\n")
 		else:
 			html_code = response.text
 			soup = BeautifulSoup(html_code, "html.parser")
 			id_marker = "__NEXT_DATA__"
 			plugin_data_element = soup.find("script", attrs={"type": "application/json", "id": id_marker})
+			print("scrape_plugin_data(): len(plugin_data_element)", len(plugin_data_element))
 			if not plugin_data_element is None:
 				plugin_data_element_str = plugin_data_element.string
 				plugin_data_json = json.loads(plugin_data_element_str)
@@ -183,12 +191,28 @@ def scrape_plugin_data(plugin_id):
 					if "pageProps" in plugin_data_json["props"].keys():
 						if "plugin" in plugin_data_json["props"]["pageProps"].keys():
 							#	print for debugging purposes
+							print("\tscraping Tenable web site for missing data for plugin ID:", plugin_id)
 							if "doc_id" in plugin_data_json["props"]["pageProps"]["plugin"].keys():
 								doc_id = plugin_data_json["props"]["pageProps"]["plugin"]["doc_id"]
 								print("\tscraping Tenable web site for missing data for plugin ID:", doc_id)
 							for field,scrape_field in plugin_missing_fields_default.items():
 								if scrape_field in plugin_data_json["props"]["pageProps"]["plugin"].keys():
-									retval[field] = plugin_data_json["props"]["pageProps"]["plugin"][scrape_field]
+									scrape_text = plugin_data_json["props"]["pageProps"]["plugin"][scrape_field]
+									try:
+										dt = dateutil.parser.parse(scrape_text)
+										retval[field] = dt.strftime("%Y/%m/%d")
+									except:
+										retval[field] = scrape_text
+							for field,scrape_field in plugin_missing_fields_extra.items():
+								if scrape_field in plugin_data_json["props"]["pageProps"]["plugin"].keys():
+									scrape_text = plugin_data_json["props"]["pageProps"]["plugin"][scrape_field]
+									try:
+										dt = dateutil.parser.parse(scrape_text)
+										retval[field] = dt.strftime("%Y/%m/%d")
+									except:
+										retval[field] = scrape_text
+							print("scrape_plugin_data(): retval:", str(retval))
+							print("\n")
 	except Exception as e:
 		print("==== Exception ====")
 		print("scrape_plugin_data()")
